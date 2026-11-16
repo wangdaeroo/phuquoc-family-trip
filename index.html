@@ -25,8 +25,26 @@
   </dialog>
   <input type="file" id="importFile" accept=".json,application/json" hidden>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="authGate" class="auth-gate" hidden>
+    <section class="auth-card" aria-labelledby="authHeading">
+      <div style="font-size:40px" aria-hidden="true">🌴</div>
+      <h1 id="authHeading">우리 가족 푸꾸옥</h1>
+      <p id="authNotice">부부 전용 여행 노트에 로그인해 주세요.</p>
+      <form id="authForm">
+        <label for="authEmail">이메일</label>
+        <input id="authEmail" name="email" type="email" autocomplete="username" required placeholder="이메일 주소">
+        <label for="authPassword">비밀번호</label>
+        <input id="authPassword" name="password" type="password" autocomplete="current-password" required placeholder="비밀번호">
+        <p id="authError" role="alert" class="auth-error" hidden></p>
+        <button class="primary-button" id="authSubmit" type="submit">로그인</button>
+      </form>
+      <button id="authRetry" class="secondary-button" hidden type="button">다른 계정으로 로그인</button>
+      <small>초대된 가족 계정만 여행 정보를 열 수 있어요.</small>
+    </section>
+  </div>
   <script src="data.js" defer></script>
   <script src="store.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="firebase-config.js" defer></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

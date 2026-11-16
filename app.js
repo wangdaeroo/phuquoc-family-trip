@@ -1,3 +1,4 @@
+import './firebase/bridge.js';
 /*
   푸꾸옥 가족여행 플래너 - 바닐라 JavaScript
   파이썬/서버/빌드 툴 없이 실행됩니다.
@@ -77,7 +78,7 @@
   const modal = document.getElementById('modalContent');
   const inputFile = document.getElementById('importFile');
   const toastElement = document.getElementById('toast');
-  const store = new window.TripStore.LocalTripStore();
+  const store = window.TripStore.FirebaseTripStore ? new window.TripStore.FirebaseTripStore() : new window.TripStore.LocalTripStore();
   let state;
   let toastTimer;
   const ui = {tab:'home', selectedDate:null, placeFilter:'all', regionFilter:'all', taskGroup:'before', taskIncompleteOnly:false};
@@ -180,7 +181,7 @@
     return `<section class="hero"><div class="eyebrow">FAMILY TRIP · PHU QUOC</div><h1>${esc(state.trip.title)}</h1><p>베트남 · ${esc(range)} ${state.trip.datesAreExamples?'(임시 날짜)':''}</p><div class="hero-status">${icon('sun','tiny')}${esc(status)}</div><div class="hero-art" aria-hidden="true"><div class="sun"></div><div class="island"></div><div class="island second"></div><svg class="tree" viewBox="0 0 85 93"><path d="M40 92 45 31" stroke="#176359" stroke-width="7" stroke-linecap="round"/><path d="M45 31Q21 7 5 36M45 31Q56 1 80 13M45 31Q70 27 84 49M45 31Q16 12 28 1" stroke="#176359" stroke-width="7" fill="none" stroke-linecap="round"/></svg></div></section>`;
   }
   function privacyNote() {
-    return `<div class="privacy-note">${icon('info','tiny')}<span><strong>1차 체험판:</strong> 현재 내용은 이 기기에만 저장됩니다. 부부 전용 로그인·실시간 공동 편집은 Firebase 연결 후 사용할 수 있습니다.</span></div>`;
+    return store.isCloud?`<div class="privacy-note">${icon('shield','tiny')}<span><strong>가족 공유 중</strong> · 로그인한 부부 계정의 일정과 준비물은 실시간으로 동기화됩니다.</span></div>`:`<div class="privacy-note">${icon('info','tiny')}<span><strong>로컬 모드:</strong> Firebase 설정 전이므로 현재 내용은 이 기기에만 저장됩니다.</span></div>`;
   }
   function renderHome() {
     const plans=sortsPlans(ui.selectedDate);
@@ -204,7 +205,7 @@
   }
   function renderBookings() {
     const sorted=[...state.bookings].sort((a,b)=>a.startDate.localeCompare(b.startDate));
-    return `<header class="page-heading"><h1>예약 · 중요 자료</h1><p>항공권, 호텔, 교통, 액티비티를 한곳에서 관리하세요.</p></header><div class="tip-card">${icon('shield')}<p>실제 항공권 원본은 본인 계정에 접근 권한이 설정된 드라이브 등에 저장하고, 여기에는 <strong>열람 링크</strong>를 등록하세요. 현재는 부부 실시간 공유 기능이 없습니다.</p></div><section class="section">${sorted.length?sorted.map((b)=>bookingRow(b)).join(''):emptyState('ticket','등록된 예약이 아직 없어요','booking','항공·호텔 예약 추가')}</section>${fab('booking')}`;
+    return `<header class="page-heading"><h1>예약 · 중요 자료</h1><p>항공권, 호텔, 교통, 액티비티를 한곳에서 관리하세요.</p></header><div class="tip-card">${icon('shield')}<p>실제 항공권 원본은 본인 계정에 접근 권한이 설정된 드라이브 등에 저장하고, 여기에는 <strong>열람 링크</strong>를 등록하세요. 문서 자체의 공유 권한도 반드시 확인하세요.</p></div><section class="section">${sorted.length?sorted.map((b)=>bookingRow(b)).join(''):emptyState('ticket','등록된 예약이 아직 없어요','booking','항공·호텔 예약 추가')}</section>${fab('booking')}`;
   }
   function renderPlaceCard(place) {
     const cat=PLACE_TYPES[place.type]||PLACE_TYPES.other;
@@ -375,7 +376,7 @@
   }
   function settings() {
     const trip=state.trip;
-    modal.innerHTML=`<div class="modal-head"><h2>여행 설정</h2><button class="round-button" type="button" data-action="close" aria-label="닫기">${icon('x')}</button></div><div class="modal-body"><div class="modal-note">${icon('info','tiny')} 여행 기간은 <strong>예시 날짜</strong>로 입력되어 있습니다. 실제 여행 날짜로 변경해 주세요.</div><form data-editor="trip">${textField('여행 이름','title',trip.title,{required:true,maxLength:60})}<div class="field-grid">${textField('출발 날짜','startDate',trip.startDate,{type:'date',required:true})}${textField('귀국 날짜','endDate',trip.endDate,{type:'date',required:true})}</div><label class="hint-line"><input type="checkbox" name="shiftPlans" checked> 기존 일정을 변경된 출발 날짜만큼 함께 이동</label><div class="form-footer"><button type="submit" class="primary-button">${icon('check','tiny')}여행 설정 저장</button></div></form><div class="soft-divider"></div><div class="setting-block"><strong>데이터 보관 · 백업</strong><p>현재 데이터는 이 기기의 브라우저에만 저장됩니다. 기기 변경이나 브라우저 기록 삭제에 대비해 JSON 백업을 보관하세요.</p><div class="button-row"><button class="secondary-button" data-action="export">${icon('download','tiny')}백업 내보내기</button><button class="secondary-button" data-action="import">${icon('upload','tiny')}백업 불러오기</button></div></div><div class="setting-block"><strong>공유 · 공동 편집</strong><p>현재는 링크를 전달해도 상대방에게 내 일정 데이터가 보이지 않습니다. GitHub Pages는 화면을 게시하고, 향후 Firebase 로그인·DB 연결 시 부부만 실제 데이터를 공유할 수 있습니다.</p><div class="button-row"><button class="secondary-button" data-action="share">${icon('share','tiny')}앱 링크 공유</button></div></div><div class="setting-block"><strong>예시 데이터 초기화</strong><p>현재 기기에 저장한 모든 항목을 지우고 처음 예시 상태로 되돌립니다.</p><button class="secondary-button" data-action="reset" style="color:#a85851">${icon('trash','tiny')}전체 초기화</button></div></div>`;
+    modal.innerHTML=`<div class="modal-head"><h2>여행 설정</h2><button class="round-button" type="button" data-action="close" aria-label="닫기">${icon('x')}</button></div><div class="modal-body"><div class="modal-note">${icon('info','tiny')} 여행 기간은 <strong>예시 날짜</strong>로 입력되어 있습니다. 실제 여행 날짜로 변경해 주세요.</div><form data-editor="trip">${textField('여행 이름','title',trip.title,{required:true,maxLength:60})}<div class="field-grid">${textField('출발 날짜','startDate',trip.startDate,{type:'date',required:true})}${textField('귀국 날짜','endDate',trip.endDate,{type:'date',required:true})}</div><label class="hint-line"><input type="checkbox" name="shiftPlans" checked> 기존 일정을 변경된 출발 날짜만큼 함께 이동</label><div class="form-footer"><button type="submit" class="primary-button">${icon('check','tiny')}여행 설정 저장</button></div></form><div class="soft-divider"></div><div class="setting-block"><strong>데이터 보관 · 백업</strong><p>${store.isCloud?'현재 데이터는 Firebase에서 부부에게 공동 저장됩니다. 별도 JSON 백업도 권장합니다.':'현재 데이터는 이 기기의 브라우저에만 저장됩니다. JSON 백업을 보관하세요.'}</p><div class="button-row"><button class="secondary-button" data-action="export">${icon('download','tiny')}백업 내보내기</button><button class="secondary-button" data-action="import">${icon('upload','tiny')}백업 불러오기</button></div></div><div class="setting-block"><strong>공유 · 공동 편집</strong><p>${store.isCloud?'부부 각자 계정으로 로그인하면 동일한 일정과 체크 상태를 볼 수 있습니다. 다른 계정은 보안 규칙으로 차단됩니다.':'Firebase 설정이 아직 없으므로 링크를 전달해도 상대방에게 입력 데이터는 보이지 않습니다.'}</p><div class="button-row"><button class="secondary-button" data-action="share">${icon('share','tiny')}앱 링크 공유</button></div></div><div class="setting-block"><strong>예시 데이터 초기화</strong><p>${store.isCloud?'주의: 부부가 공동 사용하는 데이터 전체가 삭제되고 예시 데이터로 바뀝니다.':'현재 기기의 저장 항목을 지우고 처음 예시 상태로 되돌립니다.'}</p><button class="secondary-button" data-action="reset" style="color:#a85851">${icon('trash','tiny')}전체 초기화</button></div>${store.isCloud?`<div class="setting-block"><strong>가족 계정</strong><p>로그인: ${esc(store.email||'')}</p><button type="button" class="secondary-button" data-action="logout">로그아웃</button></div>`:''}</div>`;
     dialog.showModal();
   }
   async function saveForm(form) {
@@ -476,7 +477,7 @@
       if(!/^\d{4}-\d{2}-\d{2}$/.test(json.trip.startDate)||!/^\d{4}-\d{2}-\d{2}$/.test(json.trip.endDate))throw new Error('날짜 정보가 잘못되었습니다.');
       const duration=daysBetween(json.trip.startDate,json.trip.endDate);
       if(!Number.isFinite(duration)||duration<0||duration>59)throw new Error('지원하지 않는 여행 기간입니다.');
-      if(!window.confirm('현재 기기에 저장된 여행 데이터를 백업 파일 내용으로 교체할까요?'))return;
+      if(!window.confirm(store.isCloud?'부부가 공유하는 모든 여행 데이터를 이 백업 파일로 교체할까요? 두 사람에게 함께 적용됩니다.':'현재 기기에 저장된 여행 데이터를 백업 파일 내용으로 교체할까요?'))return;
       await store.save(json);
       ui.selectedDate=defaultSelectedDate();
       if(dialog.open)dialog.close();
@@ -489,9 +490,9 @@
     if(location.protocol==='file:') {toast('GitHub Pages에 게시한 후 공유 링크를 사용할 수 있어요.');return;}
     try {
       if(navigator.share){await navigator.share({title:'우리 가족 푸꾸옥 여행',url});return;}
-      if(navigator.clipboard){await navigator.clipboard.writeText(url);toast('앱 링크를 복사했습니다. 데이터는 공유되지 않습니다.');return;}
+      if(navigator.clipboard){await navigator.clipboard.writeText(url);toast(store.isCloud?'앱 링크를 복사했습니다. 가족 계정 로그인 후 사용할 수 있어요.':'앱 링크를 복사했습니다. 데이터는 공유되지 않습니다.');return;}
     }catch(error){if(error.name==='AbortError')return;}
-    window.prompt('아래 주소를 복사하세요. 이 기기 데이터는 공유되지 않습니다.',url);
+    window.prompt(store.isCloud?'아래 주소를 복사하세요. 가족 계정 로그인이 필요합니다.':'아래 주소를 복사하세요. 이 기기 데이터는 공유되지 않습니다.',url);
   }
   async function handleAction(button) {
     const action=button.dataset.action,id=button.dataset.id,kind=button.dataset.kind;
@@ -532,8 +533,9 @@
     if(action==='export'){exportData();return;}
     if(action==='import'){inputFile.click();return;}
     if(action==='share'){shareLink();return;}
+    if(action==='logout' && store.isCloud){ if(window.confirm('로그아웃할까요?')) await store.logout(); return; }
     if(action==='reset'){
-      if(!window.confirm('모든 여행 정보가 삭제됩니다. 초기화할까요?'))return;
+      if(!window.confirm(store.isCloud?'부부가 함께 쓰는 모든 여행 정보가 초기화됩니다. 정말 초기화할까요?':'모든 여행 정보가 삭제됩니다. 초기화할까요?'))return;
       await store.save(window.TripStore.freshData());
       ui.selectedDate=defaultSelectedDate();
       if(dialog.open)dialog.close();

@@ -228,3 +228,18 @@ svg { flex: none; }
   .group-manager-row { flex-direction:column; align-items:stretch; }
   .group-manager-buttons { justify-content:flex-start; }
 }
+
+
+/* v4: Firebase 전용 로그인 화면. 실제 인증은 Firebase Authentication이 처리합니다. */
+.auth-gate { position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:center; padding:24px; background:linear-gradient(145deg,#d7eee7,#f9faf1); }
+.auth-gate[hidden], .auth-error[hidden], #authRetry[hidden] { display:none !important; }
+.auth-card { width:min(100%,420px); background:#fff; border-radius:24px; box-shadow:0 12px 40px #235f4c25; padding:30px 24px; text-align:center; }
+.auth-card h1 { color:#20554a; font-size:24px; margin:10px 0; }
+.auth-card p { color:#68776f; font-size:14px; line-height:1.6; }
+.auth-card form { display:flex; flex-direction:column; text-align:left; margin-top:20px; gap:8px; }
+.auth-card label { color:#334840; font-size:13px; font-weight:650; }
+.auth-card input { border:1px solid #c8d6d0; background:#fff; color:#192c25; border-radius:11px; padding:13px 12px; font-size:16px; width:100%; box-sizing:border-box; }
+.auth-card .primary-button { width:100%; margin-top:12px; min-height:46px; }
+.auth-card small { display:block; color:#728079; margin-top:18px; }
+.auth-card .auth-error { color:#aa3f3f; margin:8px 0 2px; font-size:13px; }
+.auth-card #authRetry { margin:12px auto; }
