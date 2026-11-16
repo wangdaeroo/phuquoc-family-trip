@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function loggedIn() { return request.auth != null; }
+
+    function tripExists(tripId) {
+      return exists(/databases/$(database)/documents/trips/$(tripId));
+    }
+
+    function member(tripId) {
+      return loggedIn() && tripExists(tripId) &&
+        request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.memberUids;
+    }
+
+    match /trips/{tripId} {
+      // 최초 여행 문서 생성은 Firebase 관리자 콘솔 등 신뢰 가능한 경로로 수행.
+      allow create, delete: if false;
+      allow read: if member(tripId);
+      // 여행 멤버 목록이 앱에서 임의로 바뀌지 않게 제한.
+      allow update: if member(tripId) &&
+        request.resource.data.memberUids == resource.data.memberUids;
+
+      match /{collectionId}/{docId} {
+        allow read, create, update, delete: if member(tripId) &&
+          collectionId in ['plans', 'bookings', 'places', 'tasks', 'taskGroups'];
+      }
+    }
+  }
+}
