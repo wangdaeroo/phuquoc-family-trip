@@ -243,3 +243,13 @@ svg { flex: none; }
 .auth-card small { display:block; color:#728079; margin-top:18px; }
 .auth-card .auth-error { color:#aa3f3f; margin:8px 0 2px; font-size:13px; }
 .auth-card #authRetry { margin:12px auto; }
+
+/* v5: 일정 - 예약 1회 입력 / 양방향 연결 */
+.linked-booking { display:flex; align-items:center; gap:5px; margin-top:8px; color:#087e74; font-size:11px; line-height:1.5; font-weight:700; }
+.linked-booking .icon { width:14px; height:14px; flex:none; }
+.booking-connect { margin-top:7px; background:#eff8f5; border:1px solid #d8ece5; padding:15px 13px 2px; border-radius:14px; }
+.booking-connect > strong { display:flex; align-items:center; gap:6px; font-size:13px; color:#166a5e; margin-bottom:7px; }
+.booking-connect > strong .icon { width:16px; height:16px; }
+.booking-connect > p { font-size:11px; color:#526e69; line-height:1.7; margin:4px 0 15px; }
+.booking-connect .field { margin-bottom:11px; }
+.booking-connect .hint-line { margin:4px 0 15px; }

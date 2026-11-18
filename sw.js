@@ -1,6 +1,6 @@
 // GitHub Pages 등 HTTPS에서만 등록되는 선택적 오프라인 캐시.
 // 웹앱 파일을 업데이트하면 CACHE_VERSION 숫자를 올려주세요.
-const CACHE_VERSION = 'phuquoc-family-v4';
+const CACHE_VERSION = 'phuquoc-family-v5';
 const STATIC_FILES = [
   './', './index.html', './styles.css', './data.js', './store.js', './app.js',
   './firebase-config.js', './firebase/bridge.js', './manifest.webmanifest', './assets/icon.svg', './assets/touch-icon.png'

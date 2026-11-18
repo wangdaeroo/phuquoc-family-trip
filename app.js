@@ -144,6 +144,58 @@ import './firebase/bridge.js';
   function bookingsForDate(date) {
     return state.bookings.filter((b)=>b.startDate<=date && (b.endDate||b.startDate)>=date);
   }
+  // 예약은 정보 원본, 일정은 해당 예약을 참조하는 항목입니다. 기존 v4의 bookingId도 그대로 읽습니다.
+  function linkedPlans(bookingId) { return state.plans.filter((p)=>p.bookingId===bookingId); }
+  function agendaTemplates(booking) {
+    if(booking.type==='hotel') {
+      const items=[{role:'checkin',date:booking.startDate,time:booking.startTime||'',category:'stay',label:'체크인'}];
+      if(booking.endDate && booking.endDate!==booking.startDate) items.push({role:'checkout',date:booking.endDate,time:booking.endTime||'',category:'stay',label:'체크아웃'});
+      return items;
+    }
+    const map={flight:['move','출발'],transport:['move','이동'],activity:['activity','방문'],other:['activity','예약 일정']};
+    const [category,label]=map[booking.type]||map.other;
+    return [{role:'start',date:booking.startDate,time:booking.startTime||'',category,label}];
+  }
+  function planRoleMatches(plan,template,booking) {
+    if(plan.autoBookingRole) return plan.autoBookingRole===template.role;
+    if(template.role==='checkout') return plan.date===booking.endDate && /체크아웃|퇴실|check.?out/i.test(plan.title);
+    if(template.role==='checkin') return plan.date===booking.startDate && !/체크아웃|퇴실|check.?out/i.test(plan.title);
+    return plan.date===booking.startDate;
+  }
+  function missingAgendaTemplates(booking, plans) {
+    const existing=plans.filter((p)=>p.bookingId===booking.id);
+    return agendaTemplates(booking).filter((t)=>!existing.some((p)=>planRoleMatches(p,t,booking)));
+  }
+  function createAgendaForBooking(next,booking) {
+    const missing=missingAgendaTemplates(booking,next.plans);
+    let count=0;
+    for(const template of missing){
+      if(template.date<next.trip.startDate || template.date>next.trip.endDate) continue;
+      next.plans.push({id:uid(),date:template.date,time:template.time,title:template.label,
+        category:template.category,location:'',note:'',url:'',bookingId:booking.id,
+        autoBookingRole:template.role});
+      count++;
+    }
+    return count;
+  }
+  function bookingPlanTitle(plan,booking) {
+    if(!booking || !plan.autoBookingRole) return plan.title;
+    const template=agendaTemplates(booking).find((t)=>t.role===plan.autoBookingRole);
+    if(plan.title && template && plan.title!==template.label) return plan.title;
+    return `${booking.title} · ${template?.label||plan.title}`;
+  }
+  function syncAutoAgenda(next,booking,previous) {
+    const before=previous||{};
+    for(const p of next.plans.filter((plan)=>plan.bookingId===booking.id && plan.autoBookingRole)) {
+      const template=agendaTemplates(booking).find((t)=>t.role===p.autoBookingRole);
+      if(!template)continue;
+      if(template.date) p.date=template.date;
+      // 일정을 따로 수정한 시간은 유지하고, 예약에서 시간을 변경했을 때만 동기화합니다.
+      const oldTime=p.autoBookingRole==='checkout'?(before.endTime||''):(before.startTime||'');
+      const newTime=p.autoBookingRole==='checkout'?(booking.endTime||''):(booking.startTime||'');
+      if(oldTime!==newTime) p.time=newTime;
+    }
+  }
   function dateStrip() {
     const names=['일','월','화','수','목','금','토'];
     return `<div class="date-strip" role="group" aria-label="여행 날짜 선택">${dayDates().map((date)=>{
@@ -157,12 +209,15 @@ import './firebase/bridge.js';
   function planRow(plan, compact=false) {
     const cat=PLAN_TYPES[plan.category]||PLAN_TYPES.activity;
     const booking=plan.bookingId?state.bookings.find((b)=>b.id===plan.bookingId):null;
-    return `<div class="timeline-item"><div class="time-column">${esc(plan.time||'시간 미정')}</div><div class="timeline-card"><span class="category-icon ${esc(plan.category)}">${icon(cat.icon)}</span><div class="timeline-content"><h3>${esc(plan.title)}</h3>${plan.location?`<p>${icon('pin','tiny')} ${esc(plan.location)}</p>`:''}${plan.note&&!compact?`<p>${esc(plan.note)}</p>`:''}<div class="mini-actions">${linkButton(plan.url,'자료')}${booking?linkButton(booking.url,'예약 확인'):''}${plan.location?linkButton(googleMapLink(plan.location),'지도'):''}<button type="button" class="mini-action" data-action="edit" data-kind="plan" data-id="${esc(plan.id)}">${icon('edit','tiny')}수정</button>${!compact?`<button type="button" class="mini-action red" data-action="delete" data-kind="plan" data-id="${esc(plan.id)}">${icon('trash','tiny')}삭제</button>`:''}</div></div></div></div>`;
+    const location=plan.location||booking?.location||'';
+    const title=bookingPlanTitle(plan,booking);
+    return `<div class="timeline-item"><div class="time-column">${esc(plan.time||'시간 미정')}</div><div class="timeline-card"><span class="category-icon ${esc(plan.category)}">${icon(cat.icon)}</span><div class="timeline-content"><h3>${esc(title)}</h3>${location?`<p>${icon('pin','tiny')} ${esc(location)}</p>`:''}${booking?`<div class="linked-booking">${icon('ticket','tiny')}<span>예약 연결 · ${esc(booking.title)}</span></div>`:''}${plan.note&&!compact?`<p>${esc(plan.note)}</p>`:''}<div class="mini-actions">${linkButton(plan.url,'일정 자료')}${booking?linkButton(booking.url,'예약 문서'):''}${location?linkButton(googleMapLink(location),'지도'):''}${booking?`<button type="button" class="mini-action" data-action="booking-detail" data-id="${esc(booking.id)}">${icon('ticket','tiny')}예약 상세</button>`:plan.category!=='food'&&plan.category!=='rest'?`<button type="button" class="mini-action" data-action="booking-from-plan" data-id="${esc(plan.id)}">${icon('ticket','tiny')}예약 만들기</button>`:''}<button type="button" class="mini-action" data-action="edit" data-kind="plan" data-id="${esc(plan.id)}">${icon('edit','tiny')}수정</button>${!compact?`<button type="button" class="mini-action red" data-action="delete" data-kind="plan" data-id="${esc(plan.id)}">${icon('trash','tiny')}삭제</button>`:''}</div></div></div></div>`;
   }
   function bookingRow(b,compact=false) {
     const type=BOOK_TYPES[b.type]||BOOK_TYPES.other;
     const dateStr=b.endDate&&b.endDate!==b.startDate?`${dayLabel(b.startDate)} ~ ${dayLabel(b.endDate)}`:dayLabel(b.startDate);
-    return `<article class="booking-card card"><div class="booking-top"><div class="booking-main"><span class="category-icon ${b.type==='hotel'?'stay':''}">${icon(type.icon)}</span><div><span class="badge grey">${esc(type.label)}</span><h3 class="item-title" style="margin-top:6px">${esc(b.title)}</h3><div class="booking-meta">${esc(dateStr)}${b.reference?`<div>예약번호: <strong>${esc(b.reference)}</strong></div>`:''}${b.note&&!compact?`<div>${esc(b.note)}</div>`:''}</div></div></div></div><div class="mini-actions" style="margin-left:47px">${linkButton(b.url,'예약 정보 열기')}<button class="mini-action" data-action="edit" data-kind="booking" data-id="${esc(b.id)}">${icon('edit','tiny')}수정</button>${!compact?`<button class="mini-action red" data-action="delete" data-kind="booking" data-id="${esc(b.id)}">${icon('trash','tiny')}삭제</button>`:''}</div></article>`;
+    const linked=linkedPlans(b.id),missing=missingAgendaTemplates(b,state.plans);
+    return `<article class="booking-card card"><div class="booking-top"><div class="booking-main"><span class="category-icon ${b.type==='hotel'?'stay':''}">${icon(type.icon)}</span><div><span class="badge grey">${esc(type.label)}</span><h3 class="item-title" style="margin-top:6px">${esc(b.title)}</h3><div class="booking-meta">${esc(dateStr)}${b.location?`<div>${icon('pin','tiny')} ${esc(b.location)}</div>`:''}${b.reference?`<div>예약번호: <strong>${esc(b.reference)}</strong></div>`:''}${b.note&&!compact?`<div>${esc(b.note)}</div>`:''}</div>${linked.length?`<div class="linked-booking">${icon('check','tiny')} 일정 ${linked.length}개 연결됨</div>`:''}</div></div></div><div class="mini-actions" style="margin-left:47px">${linkButton(b.url,'예약 정보 열기')}${linked.length?`<button class="mini-action" data-action="show-booking-plans" data-id="${esc(b.id)}">${icon('calendar','tiny')}연결 일정</button>`:''}${missing.length?`<button class="mini-action" data-action="booking-to-plan" data-id="${esc(b.id)}">${icon('plus','tiny')}일정에 추가</button>`:''}<button class="mini-action" data-action="edit" data-kind="booking" data-id="${esc(b.id)}">${icon('edit','tiny')}수정</button>${!compact?`<button class="mini-action red" data-action="delete" data-kind="booking" data-id="${esc(b.id)}">${icon('trash','tiny')}삭제</button>`:''}</div></article>`;
   }
   function taskRow(task, compact=false) {
     const done=!!task.done;
@@ -201,11 +256,11 @@ import './firebase/bridge.js';
   function renderPlans() {
     const plans=sortsPlans(ui.selectedDate);
     const grouped=state.plans.length;
-    return `<header class="page-heading"><h1>여행 일정</h1><p>날짜별로 일정을 정리하고 예약·지도 링크를 연결하세요.</p></header><div class="section-head"><div><h2>${esc(dayLabel(ui.selectedDate,true))}</h2><p>등록된 일정 ${plans.length}개 · 전체 ${grouped}개</p></div><button class="text-button" data-action="add" data-kind="plan">${icon('plus','tiny')}일정 추가</button></div>${dateStrip()}<section class="section">${plans.length?`<div class="timeline">${plans.map((p)=>planRow(p,false)).join('')}</div>`:emptyState('calendar','이날 일정이 비어 있어요','plan','새 일정 추가')}</section><div class="tip-card">${icon('info')}<p><strong>팁:</strong> 일정에 예약을 연결하면 해당 예약 링크도 바로 열 수 있습니다. 날짜는 위에서 눌러 바꿀 수 있어요.</p></div>${fab('plan')}`;
+    return `<header class="page-heading"><h1>여행 일정</h1><p>예약을 한 번 등록하면 일정과 연결해 중복 입력을 줄일 수 있어요.</p></header><div class="section-head"><div><h2>${esc(dayLabel(ui.selectedDate,true))}</h2><p>등록된 일정 ${plans.length}개 · 전체 ${grouped}개</p></div><button class="text-button" data-action="add" data-kind="plan">${icon('plus','tiny')}일정 추가</button></div>${dateStrip()}<section class="section">${plans.length?`<div class="timeline">${plans.map((p)=>planRow(p,false)).join('')}</div>`:emptyState('calendar','이날 일정이 비어 있어요','plan','새 일정 추가')}</section><div class="tip-card">${icon('info')}<p><strong>팁:</strong> 기존 일정의 <b>예약 만들기</b>를 누르면 해당 내용으로 예약을 등록할 수 있어요. 예약을 먼저 만들면 일정 자동 추가도 가능합니다.</p></div>${fab('plan')}`;
   }
   function renderBookings() {
     const sorted=[...state.bookings].sort((a,b)=>a.startDate.localeCompare(b.startDate));
-    return `<header class="page-heading"><h1>예약 · 중요 자료</h1><p>항공권, 호텔, 교통, 액티비티를 한곳에서 관리하세요.</p></header><div class="tip-card">${icon('shield')}<p>실제 항공권 원본은 본인 계정에 접근 권한이 설정된 드라이브 등에 저장하고, 여기에는 <strong>열람 링크</strong>를 등록하세요. 문서 자체의 공유 권한도 반드시 확인하세요.</p></div><section class="section">${sorted.length?sorted.map((b)=>bookingRow(b)).join(''):emptyState('ticket','등록된 예약이 아직 없어요','booking','항공·호텔 예약 추가')}</section>${fab('booking')}`;
+    return `<header class="page-heading"><h1>예약 · 중요 자료</h1><p>예약을 한 번만 등록해 일정과 연결하세요. 호텔 체크인·체크아웃도 자동 등록할 수 있어요.</p></header><div class="tip-card">${icon('shield')}<p>실제 항공권 원본은 본인 계정에 접근 권한이 설정된 드라이브 등에 저장하고, 여기에는 <strong>열람 링크</strong>를 등록하세요. 문서 자체의 공유 권한도 반드시 확인하세요.</p></div><section class="section">${sorted.length?sorted.map((b)=>bookingRow(b)).join(''):emptyState('ticket','등록된 예약이 아직 없어요','booking','항공·호텔 예약 추가')}</section>${fab('booking')}`;
   }
   function renderPlaceCard(place) {
     const cat=PLACE_TYPES[place.type]||PLACE_TYPES.other;
@@ -306,13 +361,23 @@ import './firebase/bridge.js';
         textField('자료 링크 (선택)','url',item.url||'',{type:'url',placeholder:'https://...'})+
         areaField('메모','note',item.note||'','이동 방법, 아이들 휴식 등'),kind,id);
     } else if(kind==='booking') {
+      const available=state.plans.filter((p)=>!p.bookingId || p.bookingId===id);
+      const sourcePlan=item.originPlanId?state.plans.find((p)=>p.id===item.originPlanId):null;
+      const defaultMode=sourcePlan?'existing':id?'none':'auto';
+      const planOpts={'':'연결할 일정 선택',...Object.fromEntries(available.map((p)=>[p.id,`${dayLabel(p.date)} · ${p.title}`]))};
       html=formFrame(id?'예약 수정':'예약 추가',
         selectField('예약 종류','type',BOOK_TYPES,item.type||'flight')+
-        textField('예약 이름','title',item.title||'',{required:true,placeholder:'예: 출국 항공편 / 숙소',maxLength:100})+
+        textField('예약 이름','title',item.title||'',{required:true,placeholder:'예: ○○ 리조트 / 출국 항공편',maxLength:100})+
         `<div class="field-grid">${textField('시작 날짜','startDate',item.startDate||ui.selectedDate,{type:'date',required:true})}${textField('종료 날짜 (선택)','endDate',item.endDate||'',{type:'date'})}</div>`+
-        textField('예약번호 (선택)','reference',item.reference||'',{placeholder:'공용·로컬 저장 여부를 확인하세요'})+
+        `<div class="field-grid">${textField('시작 시각 (선택)','startTime',item.startTime||'',{type:'time'})}${textField('종료 시각 (선택)','endTime',item.endTime||'',{type:'time'})}</div>`+
+        textField('장소 (선택)','location',item.location||'',{placeholder:'예: ○○ 리조트, 푸꾸옥'})+
+        textField('예약번호 (선택)','reference',item.reference||'',{placeholder:'예약 확인 번호'})+
         textField('예약 확인 링크 (선택)','url',item.url||'',{type:'url',placeholder:'https://...'})+
-        areaField('참고 메모','note',item.note||'','체크인 시간, 수하물 등'),kind,id);
+        areaField('참고 메모','note',item.note||'','체크인·체크아웃, 수하물 등')+
+        `<div class="booking-connect"><strong>${icon('calendar','tiny')} 일정과 연결하기</strong><p>예약정보가 원본이므로 일정에 다시 입력하지 않아도 됩니다. <b>자동 등록</b>은 호텔이면 체크인·체크아웃, 다른 예약이면 시작 일정을 만듭니다.</p>`+
+        selectField('연결 방법','scheduleMode',{'auto':'일정 자동 추가 (추천)','existing':'기존 일정 하나와 연결','none':'예약만 저장'},defaultMode)+
+        selectField('기존 일정 선택','existingPlanId',planOpts,sourcePlan?.id||'')+
+        `<p class="hint-line">기존 일정을 선택하려면 위 연결 방법을 '기존 일정 하나와 연결'로 변경하세요. 이미 연결된 다른 일정은 유지됩니다. 여행 기간 밖 예약은 자동 일정이 생성되지 않습니다.</p></div>`,kind,id);
     } else if(kind==='place') {
       html=formFrame(id?'장소 수정':'장소 추가',
         textField('장소 이름','title',item.title||'',{required:true,placeholder:'예: 가보고 싶은 식당',maxLength:100})+
@@ -429,7 +494,16 @@ import './firebase/bridge.js';
       data={date:get('date'),time:get('time'),title:get('title'),category:get('category'),location:get('location'),bookingId:get('bookingId'),url:safeUrl(get('url')),note:get('note')};
     } else if(kind==='booking') {
       if(get('endDate') && get('startDate')>get('endDate')) {toast('종료 날짜는 시작 날짜보다 빠를 수 없습니다.');return;}
-      data={title:get('title'),type:get('type'),startDate:get('startDate'),endDate:get('endDate'),reference:get('reference'),url:safeUrl(get('url')),note:get('note')};
+      data={title:get('title'),type:get('type'),startDate:get('startDate'),endDate:get('endDate'),
+        startTime:get('startTime'),endTime:get('endTime'),location:get('location'),
+        reference:get('reference'),url:safeUrl(get('url')),note:get('note')};
+      const scheduleMode=get('scheduleMode');
+      const existingPlanId=get('existingPlanId');
+      if(scheduleMode==='existing' && !existingPlanId) {toast('연결할 기존 일정을 선택해주세요.');return;}
+      if(scheduleMode==='existing') {
+        const target=state.plans.find((p)=>p.id===existingPlanId);
+        if(!target || (target.bookingId && target.bookingId!==id)) {toast('이미 다른 예약에 연결된 일정입니다.');return;}
+      }
     } else if(kind==='place') {
       data={title:get('title'),type:get('type'),region:get('region'),url:safeUrl(get('url')),mapUrl:safeUrl(get('mapUrl')),note:get('note'),liked:f.has('liked')};
     } else if(kind==='task') {
@@ -440,8 +514,22 @@ import './firebase/bridge.js';
     }
     if(!data.title) {toast('이름을 입력해주세요.');return;}
     await mutate((next)=>{
-      if(id){ const idx=next[collection].findIndex((i)=>i.id===id);if(idx>=0)next[collection][idx]={...next[collection][idx],...data}; }
-      else next[collection].push({id:uid(),...data});
+      if(kind==='booking') {
+        const oldBooking=id?next.bookings.find((b)=>b.id===id):null;
+        const previousBooking=oldBooking?{...oldBooking}:null;
+        const bookingId=id||uid();
+        const booking={...(oldBooking||{}),id:bookingId,...data};
+        if(oldBooking) Object.assign(oldBooking,data);
+        else next.bookings.push(booking);
+        if(oldBooking) syncAutoAgenda(next,booking,previousBooking);
+        if(get('scheduleMode')==='existing') {
+          const target=next.plans.find((p)=>p.id===get('existingPlanId'));
+          if(target && (!target.bookingId || target.bookingId===bookingId)) target.bookingId=bookingId;
+        } else if(get('scheduleMode')==='auto') createAgendaForBooking(next,booking);
+      } else if(id){
+        const idx=next[collection].findIndex((i)=>i.id===id);
+        if(idx>=0)next[collection][idx]={...next[collection][idx],...data};
+      } else next[collection].push({id:uid(),...data});
     },id?'수정했습니다.':'추가했습니다.');
     dialog.close();
   }
@@ -450,7 +538,8 @@ import './firebase/bridge.js';
     if(!collection||!id)return;
     const item=state[collection].find((x)=>x.id===id);
     if(!item)return;
-    if(!window.confirm(`'${item.title}' 항목을 삭제할까요?`))return;
+    const deletePrompt=kind==='booking'?`'${item.title}' 예약을 삭제할까요? 연결된 일정은 남겨두고 예약 연결만 해제합니다.`:`'${item.title}' 항목을 삭제할까요?`;
+    if(!window.confirm(deletePrompt))return;
     await mutate((next)=>{
       next[collection]=next[collection].filter((x)=>x.id!==id);
       if(kind==='booking')next.plans.forEach((p)=>{if(p.bookingId===id)p.bookingId='';});
@@ -502,6 +591,33 @@ import './firebase/bridge.js';
     if(action==='select-date'){ui.selectedDate=button.dataset.date;render();return;}
     if(action==='add'){editor(kind,null,kind==='task'?{group:ui.taskGroup,category:'misc'}:{});return;}
     if(action==='edit'){editor(kind,id);return;}
+    if(action==='booking-detail'){editor('booking',id);return;}
+    if(action==='booking-from-plan'){
+      const plan=state.plans.find((p)=>p.id===id);
+      if(!plan)return;
+      const type=plan.category==='stay'?'hotel':plan.category==='move'?'transport':'activity';
+      editor('booking',null,{title:plan.title,date:plan.date,startDate:plan.date,
+        startTime:plan.time,location:plan.location,type,originPlanId:plan.id,
+        url:plan.url});
+      return;
+    }
+    if(action==='show-booking-plans'){
+      const linked=linkedPlans(id).sort((a,b)=>a.date.localeCompare(b.date));
+      if(linked.length){ui.selectedDate=linked[0].date;switchTab('plans');}
+      return;
+    }
+    if(action==='booking-to-plan'){
+      const booking=state.bookings.find((b)=>b.id===id);
+      if(!booking)return;
+      const count=missingAgendaTemplates(booking,state.plans).filter((t)=>dateInTrip(t.date)).length;
+      if(!count){toast('여행 기간에 추가할 새 일정이 없어요.');return;}
+      await mutate((next)=>{
+        const found=next.bookings.find((b)=>b.id===id);
+        if(found)createAgendaForBooking(next,found);
+      },`일정 ${count}개를 추가했습니다.`);
+      ui.selectedDate=booking.startDate;switchTab('plans');
+      return;
+    }
     if(action==='delete'){await removeItem(kind,id);return;}
     if(action==='add-task-group'){editor('taskGroup');return;}
     if(action==='manage-task-groups'){manageTaskGroups();return;}
