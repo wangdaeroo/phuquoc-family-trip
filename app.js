@@ -1,8 +1,9 @@
 import './firebase/bridge.js';
+import './cover-photo.js';
 /*
   푸꾸옥 가족여행 플래너 - 바닐라 JavaScript
   파이썬/서버/빌드 툴 없이 실행됩니다.
-  현재 저장소: store.js의 LocalTripStore; 다른 아이폰과 자동 동기화되지 않음.
+  Firebase configured: shared Firestore; otherwise localStorage demo mode.
 */
 (function () {
   'use strict';
@@ -77,6 +78,12 @@ import './firebase/bridge.js';
   const dialog = document.getElementById('editorDialog');
   const modal = document.getElementById('modalContent');
   const inputFile = document.getElementById('importFile');
+  const coverFileInput = document.createElement('input');
+  coverFileInput.type='file';
+  coverFileInput.accept='image/*';
+  coverFileInput.hidden=true;
+  coverFileInput.setAttribute('aria-label','Select a family cover photo');
+  document.body.appendChild(coverFileInput);
   const toastElement = document.getElementById('toast');
   const store = window.TripStore.FirebaseTripStore ? new window.TripStore.FirebaseTripStore() : new window.TripStore.LocalTripStore();
   let state;
@@ -233,7 +240,7 @@ import './firebase/bridge.js';
     const until=daysBetween(todayISO(),state.trip.startDate);
     const status=until>0?`출발까지 D-${until}`:todayISO()<=state.trip.endDate?'여행 중 · 즐거운 하루!':'여행을 다녀왔어요';
     const range=`${shortDate(state.trip.startDate)} – ${shortDate(state.trip.endDate)}`;
-    return `<section class="hero"><div class="eyebrow">FAMILY TRIP · PHU QUOC</div><h1>${esc(state.trip.title)}</h1><p>베트남 · ${esc(range)} ${state.trip.datesAreExamples?'(임시 날짜)':''}</p><div class="hero-status">${icon('sun','tiny')}${esc(status)}</div><div class="hero-art" aria-hidden="true"><div class="sun"></div><div class="island"></div><div class="island second"></div><svg class="tree" viewBox="0 0 85 93"><path d="M40 92 45 31" stroke="#176359" stroke-width="7" stroke-linecap="round"/><path d="M45 31Q21 7 5 36M45 31Q56 1 80 13M45 31Q70 27 84 49M45 31Q16 12 28 1" stroke="#176359" stroke-width="7" fill="none" stroke-linecap="round"/></svg></div></section>`;
+    return `<section class="hero ${window.TripCoverPhoto?.image?'has-cover':''}">${window.TripCoverPhoto?.image?`<img class="hero-cover" src="${esc(window.TripCoverPhoto.image)}" alt="" aria-hidden="true">`:''}<div class="eyebrow">FAMILY TRIP · PHU QUOC</div><h1>${esc(state.trip.title)}</h1><p>베트남 · ${esc(range)} ${state.trip.datesAreExamples?'(임시 날짜)':''}</p><div class="hero-status">${icon('sun','tiny')}${esc(status)}</div><div class="hero-art" aria-hidden="true"><div class="sun"></div><div class="island"></div><div class="island second"></div><svg class="tree" viewBox="0 0 85 93"><path d="M40 92 45 31" stroke="#176359" stroke-width="7" stroke-linecap="round"/><path d="M45 31Q21 7 5 36M45 31Q56 1 80 13M45 31Q70 27 84 49M45 31Q16 12 28 1" stroke="#176359" stroke-width="7" fill="none" stroke-linecap="round"/></svg></div></section>`;
   }
   function privacyNote() {
     return store.isCloud?`<div class="privacy-note">${icon('shield','tiny')}<span><strong>가족 공유 중</strong> · 로그인한 부부 계정의 일정과 준비물은 실시간으로 동기화됩니다.</span></div>`:`<div class="privacy-note">${icon('info','tiny')}<span><strong>로컬 모드:</strong> Firebase 설정 전이므로 현재 내용은 이 기기에만 저장됩니다.</span></div>`;
@@ -439,10 +446,67 @@ import './firebase/bridge.js';
     },'탭을 삭제했습니다.');
     if(dialog.open)dialog.close();
   }
+  async function compressCoverPhoto(file) {
+    if(!file || !(file.type.startsWith('image/') || /\.(heic|heif|jpe?g|png|webp)$/i.test(file.name)))throw new Error('\uC0AC\uC9C4 \uD30C\uC77C\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.');
+    if(file.size>35*1024*1024)throw new Error('\uC6D0\uBCF8 \uC0AC\uC9C4\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4. 35MB \uC774\uD558\uB97C \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.');
+    const objectUrl=URL.createObjectURL(file);
+    try {
+      const image=new Image();
+      await new Promise((resolve,reject)=>{
+        image.onload=resolve;
+        image.onerror=()=>reject(new Error('\uC0AC\uC9C4\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. JPG \uB610\uB294 PNG\uB85C \uB2E4\uC2DC \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.'));
+        image.src=objectUrl;
+      });
+      if(!image.naturalWidth||!image.naturalHeight)throw new Error('\uC0AC\uC9C4 \uD06C\uAE30\uB97C \uC54C \uC218 \uC5C6\uC5B4\uC694.');
+      const canvas=document.createElement('canvas');
+      const context=canvas.getContext('2d');
+      if(!context)throw new Error('\uC0AC\uC9C4\uC744 \uC555\uCD95\uD560 \uC218 \uC5C6\uC5B4\uC694.');
+      const maxLength=window.TripCoverPhoto.limit;
+      for(const maxSide of [1600,1400,1200,1000,850]) {
+        const scale=Math.min(1,maxSide/Math.max(image.naturalWidth,image.naturalHeight));
+        canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));
+        canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+        context.fillStyle='#e6f0ee';
+        context.fillRect(0,0,canvas.width,canvas.height);
+        context.drawImage(image,0,0,canvas.width,canvas.height);
+        for(const quality of [0.84,0.76,0.65,0.52]) {
+          const result=canvas.toDataURL('image/jpeg',quality);
+          if(result.length<=maxLength)return result;
+        }
+      }
+      throw new Error('\uC555\uCD95 \uD6C4\uC5D0\uB3C4 \uC0AC\uC9C4\uC774 \uB108\uBB34 \uD07D\uB2C8\uB2E4. \uB2E4\uB978 \uC0AC\uC9C4\uC744 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.');
+    } finally { URL.revokeObjectURL(objectUrl); }
+  }
+  let coverUploadBusy=false;
+  async function uploadCoverPhoto(file) {
+    if(!file || coverUploadBusy)return;
+    coverUploadBusy=true;
+    try {
+      toast('\uC0AC\uC9C4\uC744 \uC555\uCD95\uD558\uACE0 \uC788\uC5B4\uC694...');
+      const dataUri=await compressCoverPhoto(file);
+      toast('\uAC00\uC871\uC0AC\uC9C4\uC744 \uACF5\uB3D9 \uC800\uC7A5\uC18C\uC5D0 \uC800\uC7A5\uD558\uB294 \uC911...');
+      await window.TripCoverPhoto.save(dataUri);
+      if(dialog.open&&modal.querySelector('.cover-setting'))settings();
+      if(state && ui.tab==='home')render();
+      toast('\uAC00\uC871\uC0AC\uC9C4\uC774 \uBCC0\uACBD\uB410\uC5B4\uC694!');
+    } catch(err) {
+      console.error(err);
+      toast('\uC0AC\uC9C4 \uC800\uC7A5 \uC2E4\uD328: '+err.message);
+    } finally { coverUploadBusy=false; coverFileInput.value=''; }
+  }
   function settings() {
     const trip=state.trip;
-    modal.innerHTML=`<div class="modal-head"><h2>여행 설정</h2><button class="round-button" type="button" data-action="close" aria-label="닫기">${icon('x')}</button></div><div class="modal-body"><div class="modal-note">${icon('info','tiny')} 여행 기간은 <strong>예시 날짜</strong>로 입력되어 있습니다. 실제 여행 날짜로 변경해 주세요.</div><form data-editor="trip">${textField('여행 이름','title',trip.title,{required:true,maxLength:60})}<div class="field-grid">${textField('출발 날짜','startDate',trip.startDate,{type:'date',required:true})}${textField('귀국 날짜','endDate',trip.endDate,{type:'date',required:true})}</div><label class="hint-line"><input type="checkbox" name="shiftPlans" checked> 기존 일정을 변경된 출발 날짜만큼 함께 이동</label><div class="form-footer"><button type="submit" class="primary-button">${icon('check','tiny')}여행 설정 저장</button></div></form><div class="soft-divider"></div><div class="setting-block"><strong>데이터 보관 · 백업</strong><p>${store.isCloud?'현재 데이터는 Firebase에서 부부에게 공동 저장됩니다. 별도 JSON 백업도 권장합니다.':'현재 데이터는 이 기기의 브라우저에만 저장됩니다. JSON 백업을 보관하세요.'}</p><div class="button-row"><button class="secondary-button" data-action="export">${icon('download','tiny')}백업 내보내기</button><button class="secondary-button" data-action="import">${icon('upload','tiny')}백업 불러오기</button></div></div><div class="setting-block"><strong>공유 · 공동 편집</strong><p>${store.isCloud?'부부 각자 계정으로 로그인하면 동일한 일정과 체크 상태를 볼 수 있습니다. 다른 계정은 보안 규칙으로 차단됩니다.':'Firebase 설정이 아직 없으므로 링크를 전달해도 상대방에게 입력 데이터는 보이지 않습니다.'}</p><div class="button-row"><button class="secondary-button" data-action="share">${icon('share','tiny')}앱 링크 공유</button></div></div><div class="setting-block"><strong>예시 데이터 초기화</strong><p>${store.isCloud?'주의: 부부가 공동 사용하는 데이터 전체가 삭제되고 예시 데이터로 바뀝니다.':'현재 기기의 저장 항목을 지우고 처음 예시 상태로 되돌립니다.'}</p><button class="secondary-button" data-action="reset" style="color:#a85851">${icon('trash','tiny')}전체 초기화</button></div>${store.isCloud?`<div class="setting-block"><strong>가족 계정</strong><p>로그인: ${esc(store.email||'')}</p><button type="button" class="secondary-button" data-action="logout">로그아웃</button></div>`:''}</div>`;
-    dialog.showModal();
+    const cover=window.TripCoverPhoto;
+    const coverPreview=cover?.image
+      ? `<img class="cover-preview-image" src="${esc(cover.image)}" alt="Current family cover">`
+      : `<span class="cover-preview-empty" aria-hidden="true">&#127796;</span>`;
+    const coverBlock=`<div class="setting-block cover-setting"><strong>\uD648 \uBC30\uACBD\uC0AC\uC9C4</strong>
+      <p>\uC544\uC774\uD3F0\uC5D0\uC11C \uAC00\uC871\uC0AC\uC9C4\uC744 \uACE8\uB77C \uBCC0\uACBD\uD558\uC138\uC694. \uC790\uB3D9 \uC555\uCD95\uD558\uC5EC ${store.isCloud?'Firebase Firestore\uC5D0 \uBD80\uBD80 \uC804\uC6A9\uC73C\uB85C \uC800\uC7A5':'\uC774 \uAE30\uAE30\uC5D0 \uC800\uC7A5'}\uD569\uB2C8\uB2E4.</p>
+      <div class="cover-preview">${coverPreview}</div>
+      <div class="button-row"><button class="secondary-button" type="button" data-action="choose-cover" ${cover?.ready?'':'disabled'}>${icon('upload','tiny')}\uC0AC\uC9C4 \uC120\uD0DD\u00B7\uBCC0\uACBD</button>${cover?.image?`<button class="secondary-button" type="button" data-action="remove-cover">${icon('trash','tiny')}\uAE30\uBCF8 \uBC30\uACBD\uC73C\uB85C</button>`:''}</div>
+      <p class="cover-hint">${cover?.ready?'\uC0AC\uC9C4\uC744 \uBC14\uAFB8\uBA74 \uB85C\uADF8\uC778\uD55C \uBD80\uBD80 \uC591\uCABD\uC5D0 \uBC14\uB85C \uBC18\uC601\uB429\uB2C8\uB2E4.':'\uC0AC\uC9C4 \uC800\uC7A5\uC18C\uC5D0 \uC5F0\uACB0\uD558\uACE0 \uC788\uC5B4\uC694...'} \uAC00\uC871\uC0AC\uC9C4\uC740 GitHub\uC5D0 \uC62C\uB77C\uAC00\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.</p></div>`;
+    modal.innerHTML=`<div class="modal-head"><h2>여행 설정</h2><button class="round-button" type="button" data-action="close" aria-label="닫기">${icon('x')}</button></div><div class="modal-body"><div class="modal-note">${icon('info','tiny')} 여행 기간은 <strong>예시 날짜</strong>로 입력되어 있습니다. 실제 여행 날짜로 변경해 주세요.</div><form data-editor="trip">${textField('여행 이름','title',trip.title,{required:true,maxLength:60})}<div class="field-grid">${textField('출발 날짜','startDate',trip.startDate,{type:'date',required:true})}${textField('귀국 날짜','endDate',trip.endDate,{type:'date',required:true})}</div><label class="hint-line"><input type="checkbox" name="shiftPlans" checked> 기존 일정을 변경된 출발 날짜만큼 함께 이동</label><div class="form-footer"><button type="submit" class="primary-button">${icon('check','tiny')}여행 설정 저장</button></div></form>${coverBlock}<div class="soft-divider"></div><div class="setting-block"><strong>데이터 보관 · 백업</strong><p>${store.isCloud?'현재 데이터는 Firebase에서 부부에게 공동 저장됩니다. 별도 JSON 백업도 권장합니다.':'현재 데이터는 이 기기의 브라우저에만 저장됩니다. JSON 백업을 보관하세요.'}</p><div class="button-row"><button class="secondary-button" data-action="export">${icon('download','tiny')}백업 내보내기</button><button class="secondary-button" data-action="import">${icon('upload','tiny')}백업 불러오기</button></div></div><div class="setting-block"><strong>공유 · 공동 편집</strong><p>${store.isCloud?'부부 각자 계정으로 로그인하면 동일한 일정과 체크 상태를 볼 수 있습니다. 다른 계정은 보안 규칙으로 차단됩니다.':'Firebase 설정이 아직 없으므로 링크를 전달해도 상대방에게 입력 데이터는 보이지 않습니다.'}</p><div class="button-row"><button class="secondary-button" data-action="share">${icon('share','tiny')}앱 링크 공유</button></div></div><div class="setting-block"><strong>예시 데이터 초기화</strong><p>${store.isCloud?'주의: 부부가 공동 사용하는 데이터 전체가 삭제되고 예시 데이터로 바뀝니다.':'현재 기기의 저장 항목을 지우고 처음 예시 상태로 되돌립니다.'}</p><button class="secondary-button" data-action="reset" style="color:#a85851">${icon('trash','tiny')}전체 초기화</button></div>${store.isCloud?`<div class="setting-block"><strong>가족 계정</strong><p>로그인: ${esc(store.email||'')}</p><button type="button" class="secondary-button" data-action="logout">로그아웃</button></div>`:''}</div>`;
+    if(!dialog.open)dialog.showModal();
   }
   async function saveForm(form) {
     const kind=form.dataset.editor;
@@ -587,6 +651,14 @@ import './firebase/bridge.js';
     const action=button.dataset.action,id=button.dataset.id,kind=button.dataset.kind;
     if(action==='tab'){switchTab(button.dataset.tab);return;}
     if(action==='settings'){settings();return;}
+    if(action==='choose-cover'){coverFileInput.click();return;}
+    if(action==='remove-cover'){
+      if(!window.confirm('\uAC00\uC871\uC0AC\uC9C4\uC744 \uC9C0\uC6B0\uACE0 \uAE30\uBCF8 \uBC30\uACBD\uC73C\uB85C \uB3CC\uC544\uAC08\uAE4C\uC694?'))return;
+      await window.TripCoverPhoto.save('');
+      if(dialog.open)settings();
+      toast('\uAE30\uBCF8 \uBC30\uACBD\uC73C\uB85C \uBCC0\uACBD\uD588\uC5B4\uC694.');
+      return;
+    }
     if(action==='close'){dialog.close();return;}
     if(action==='select-date'){ui.selectedDate=button.dataset.date;render();return;}
     if(action==='add'){editor(kind,null,kind==='task'?{group:ui.taskGroup,category:'misc'}:{});return;}
@@ -679,12 +751,21 @@ import './firebase/bridge.js';
     }
   });
   inputFile.addEventListener('change',()=>importData(inputFile.files[0]));
+  coverFileInput.addEventListener('change',()=>uploadCoverPhoto(coverFileInput.files?.[0]));
   dialog.addEventListener('click',(event)=>{if(event.target===dialog)dialog.close();});
   store.subscribe((next)=>{state=next;render();});
   store.init().then((data)=>{
     state=data;
     ui.selectedDate=defaultSelectedDate();
     render();
+    window.TripCoverPhoto.subscribe(()=>{
+      if(state && ui.tab==='home')render();
+      if(dialog.open && modal.querySelector('.cover-setting'))settings();
+    });
+    window.TripCoverPhoto.init(store.isCloud).catch((error)=>{
+      console.warn('Photo synchronization unavailable',error);
+      toast('\uBC30\uACBD\uC0AC\uC9C4 \uC800\uC7A5\uC18C\uC5D0 \uC5F0\uACB0\uD558\uC9C0 \uBABB\uD588\uC5B4\uC694.');
+    });
     if(!store.persistent)toast('브라우저 저장이 제한되어 현재 세션에만 기록될 수 있어요.');
     if ('serviceWorker' in navigator && location.protocol === 'https:') {
       navigator.serviceWorker.register('./sw.js').catch((error)=>console.warn('오프라인 캐시를 등록하지 못했습니다.', error));
